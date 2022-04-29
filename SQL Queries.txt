@@ -1,0 +1,221 @@
+--1) Who had the most offer activations in 2021?
+   
+--I have verified that same offer was not activated for a customer multiple times, i.e., there are no duplicates for the combination of customer_id and offer_id using this query "SELECT customer_id, offer_id FROM customer_offers WHERE strftime('%Y', activated) = '2021' GROUP BY customer_id, offer_id having count(*) > 1;"
+-- The customer_offers data is filtered for the activation year '2021'. For each customer the count of number of offers is calculated. The data is then ranked in the decreasing order to of offer activations display the customer with most offer activations.  
+
+
+
+-- Using ORDER BY and LIMIT
+SELECT
+    customer_id,
+    strftime('%Y', activated) AS year,
+    COUNT(offer_id) AS total_offers
+FROM
+    customer_offers
+WHERE
+    strftime('%Y', activated) = '2021'
+GROUP BY
+    customer_id,
+    strftime('%Y', activated)
+ORDER BY
+    3 DESC
+LIMIT
+    1;
+    
+    
+-- Using Analytical Function RANK()    
+
+SELECT
+    customer_id,
+    year,
+    total_offers
+FROM
+    (
+        SELECT
+            customer_id,
+            year,
+            total_offers,
+            RANK() OVER(
+                ORDER BY
+                    total_offers DESC
+            ) AS rnk
+        FROM
+            (
+                SELECT
+                    customer_id,
+                    strftime('%Y', activated) AS year,
+                    COUNT(offer_id) AS total_offers
+                FROM
+                    customer_offers
+                WHERE
+                    strftime('%Y', activated) = '2021'
+                GROUP BY
+                    customer_id,
+                    strftime('%Y', activated)
+            ) a
+    ) b
+WHERE
+    rnk = 1;
+ 
+----------------------------------------------------------------------------    
+
+--2) What offer types were most popular with customers in 2021? 
+
+-- I verified in the data that within the same offer type, multiple offer_reward_id were selected by the same customer. So, in order to derive the most popular offer types with customers I calculated the count of all the customers without considering unique ids.
+--The offer_reward_id field from the customer_offer_rewards table is joined with offer_rewards table on id field. The customer_offer_rewards data is filtered only for the year '2021'. The data is then grouped by the offer type to dervice the total number of customers for each offer type. The results are then ranked in the decreasing order of the total customers and the final output is the 10 most popular offer_types based on the customer count.
+
+
+-- Using ORDER BY and LIMIT
+SELECT
+    off_r.type,
+    strftime('%Y', cor.created_at) AS year,
+    COUNT(cor.customer_id) AS total_customers_selected
+FROM
+    customer_offer_rewards cor
+    JOIN offer_rewards off_r ON cor.offer_reward_id = off_r.id
+WHERE
+    strftime('%Y', cor.created_at) = '2021'
+GROUP BY
+    off_r.type,
+    strftime('%Y', cor.created_at)
+ORDER BY
+    3 DESC
+LIMIT
+    10;
+
+
+-- Using Analytical Function RANK()    
+SELECT
+    type,
+    year,
+    total_customers_selected
+FROM
+    (
+        SELECT
+            type,
+            year,
+            total_customers_selected,
+            RANK() OVER(
+                ORDER BY
+                    total_customers_selected DESC
+            ) AS rnk
+        FROM
+            (
+                SELECT
+                    off_r.type,
+                    strftime('%Y', cor.created_at) AS year,
+                    COUNT(cor.customer_id) AS total_customers_selected
+                FROM
+                    customer_offer_rewards cor
+                    JOIN offer_rewards off_r ON cor.offer_reward_id = off_r.id
+                WHERE
+                    strftime('%Y', cor.created_at) = '2021'
+                GROUP BY
+                    off_r.type,
+                    strftime('%Y', cor.created_at)
+            ) a
+    ) b
+WHERE
+    rnk <= 10;
+    
+ ----------------------------------------------------------------------------
+
+
+
+--3) How much time does it usually take for an offer to be verified after activation?
+-- The data is filtered to include only those records with verification time populated. The data contains multiple offer activations for each customer. So, the diffrence between the verified date and the activated date is calculated in days for each customer from the customer_offers table. The resultant differnce is then Averaged to calcuate average verification time at the customer level and at the entire data set level.
+
+-- Average verification time after activation for each customer
+SELECT
+    customer_id,
+    ROUND(AVG(dif)) AS avg_verification_time
+FROM
+    (
+        SELECT
+            customer_id,
+            (JULIANDAY(verified) - JULIANDAY(activated)) AS dif
+        FROM
+            customer_offers
+        WHERE
+            verified != ''
+    ) AS t
+GROUP BY
+    customer_id;
+
+
+-- Average verification time after activation for the entire data set
+SELECT
+    ROUND(AVG(dif)) AS avg_verification_time
+FROM
+    (
+        SELECT
+            customer_id,
+            (JULIANDAY(verified) - JULIANDAY(activated)) AS dif
+        FROM
+            customer_offers
+        WHERE
+            verified != ''
+    ) AS t;
+
+----------------------------------------------------------------------------
+    
+--4) Who are the overall top 5 customers based on total count of offer redemptions?
+-- The customer_offer_redemptions table with customer_offer_id is joined with customer_offers on id field. The results are then grouped by the customer_id in the customer_offers table and the SUM operation is perfomed on all the verified_redemption_count values for each customer.
+
+
+-- Using ORDER BY and LIMIT
+SELECT
+    co.customer_id,
+    SUM(cor.verified_redemption_count) AS verified_redemption_count
+FROM
+    customer_offer_redemptions cor
+    JOIN customer_offers co ON cor.customer_offer_id = co.id
+WHERE
+    verified_redemption_count != ''
+GROUP BY
+    co.customer_id
+ORDER BY
+    2 DESC
+LIMIT
+    5;
+    
+    
+-- Using Analytical Function RANK()    
+SELECT
+    customer_id,
+    verified_redemption_count
+FROM
+    (
+        SELECT
+            customer_id,
+            verified_redemption_count,
+            RANK() OVER(
+                ORDER BY
+                    verified_redemption_count DESC
+            ) AS rnk
+        FROM
+            (
+                SELECT
+                    co.customer_id,
+                    SUM(cor.verified_redemption_count) AS verified_redemption_count
+                FROM
+                    customer_offer_redemptions cor
+                    JOIN customer_offers co ON cor.customer_offer_id = co.id
+                WHERE
+                    verified_redemption_count != ''
+                GROUP BY
+                    co.customer_id
+            ) a
+    ) b
+WHERE
+    rnk <= 5; 
+    
+    
+-- Count before processing the customer_offer_redemptions_update file - 31025     
+-- Count after processing the customer_offer_redemptions_update file - 31027
+SELECT
+    COUNT(*)
+FROM
+    customer_offer_redemptions;
+    
+-- After updating the customer_offer_redemptions data with updated file, the customer_id "40444331" moved into the top 3 of offer redemptions from the 4th position. I have provided the screenshots of the output before and after the update.
